@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # go.mod replaces FerretDB with ../FerretDB: wekan/FerretDB beside this plugin.
+      - uses: actions/checkout@v7
+        with:
+          path: caddy-ferretdb-plugin
+      - uses: actions/checkout@v7
+        with:
+          repository: wekan/FerretDB
+          ref: main-v1
+          path: FerretDB
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: caddy-ferretdb-plugin/go.mod
+      - run: go telemetry off
+      - run: go vet ./... && go test -count=1 ./...
+        shell: bash
+        working-directory: caddy-ferretdb-plugin
+        env:
+          CGO_ENABLED: "0"
