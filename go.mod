@@ -1,6 +1,6 @@
 module github.com/wekan/caddy-ferretdb-plugin
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/FerretDB/FerretDB v1.24.0
