@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,19 @@ type Store struct {
 func socketPath(dbDir string) string {
 	sum := sha256.Sum256([]byte(dbDir))
 	return filepath.Join(os.TempDir(), "weddy-"+hex.EncodeToString(sum[:6])+".sock")
+}
+
+// sqliteURL is FerretDB's SQLite URI of the directory abs. A Unix path is
+// file:/var/lib/weddy/ with its special characters escaped. A Windows path
+// keeps its drive letter in the opaque part, file:C:/Users/.../db/: as
+// file://C:%5CUsers... the drive letter was read as a host and the rest as an
+// invalid port, and FerretDB did not start on Windows at all.
+func sqliteURL(abs string) string {
+	slashed := filepath.ToSlash(abs)
+	if !strings.HasPrefix(slashed, "/") {
+		return "file:" + slashed + "/"
+	}
+	return (&url.URL{Scheme: "file", Path: slashed + "/"}).String()
 }
 
 // Options of a database.
@@ -75,7 +89,7 @@ func Open(ctx context.Context, dbDir string, opts *Options) (*Store, error) {
 	f, err := ferretdb.New(&ferretdb.Config{
 		Listener:  ferretdb.ListenerConfig{Unix: sock, TCP: opts.TCP},
 		Handler:   "sqlite",
-		SQLiteURL: (&url.URL{Scheme: "file", Path: abs + "/"}).String(),
+		SQLiteURL: sqliteURL(abs),
 		Logger:    logger,
 	})
 	if err != nil {
@@ -87,8 +101,9 @@ func Open(ctx context.Context, dbDir string, opts *Options) (*Store, error) {
 		defer close(done)
 		_ = f.Run(runCtx)
 	}()
-	uri := "mongodb://" + url.PathEscape(sock) + "/" + DatabaseName
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(15 * time.Second))
+	// The socket is the host itself, not a mongodb:// URI: the driver reads a URI
+	// host's "C:" of a Windows path as a host and a port, and refuses it.
+	client, err := mongo.Connect(options.Client().SetHosts([]string{sock}).SetServerSelectionTimeout(15 * time.Second))
 	if err != nil {
 		cancel()
 		<-done

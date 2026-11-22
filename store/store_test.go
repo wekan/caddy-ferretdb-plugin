@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -62,5 +64,43 @@ func TestAcquireShares(t *testing.T) {
 	}
 	if b.Client.Ping(ctx, nil) == nil {
 		t.Fatal("negative: the last release closes it")
+	}
+}
+
+func TestSQLiteURLKeepsTheDirectory(t *testing.T) {
+	for abs, want := range map[string]string{
+		"/var/lib/weddy/files/db": "/var/lib/weddy/files/db/",
+		"/tmp/a b/c%d":            "/tmp/a b/c%d/",
+		`C:/Users/RUNNER~1/AppData/Local/Temp/T/001/db`: "C:/Users/RUNNER~1/AppData/Local/Temp/T/001/db/",
+	} {
+		got := sqliteURL(abs)
+		u, err := url.Parse(got)
+		if err != nil {
+			t.Fatalf("%s: %s does not parse: %v", abs, got, err)
+		}
+		if u.Scheme != "file" || u.Host != "" || u.User != nil {
+			t.Fatalf("%s: %s must be a file: URI without a host", abs, got)
+		}
+		path := u.Path
+		if path == "" {
+			path = u.Opaque
+		}
+		if path != want {
+			t.Fatalf("%s: %s is the directory %q, not %q", abs, got, path, want)
+		}
+	}
+	// Negative: the old file://C:%5C... form, whose drive letter is a host.
+	if _, err := url.Parse((&url.URL{Scheme: "file", Path: `C:\Users\x` + "/"}).String()); err == nil {
+		t.Fatal("negative: the old form was expected to be refused, so this test would prove nothing")
+	}
+}
+
+func TestTheSocketIsNotInAURI(t *testing.T) {
+	src, err := os.ReadFile("store.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), `"mongodb://"`) || strings.Contains(string(src), "ApplyURI(") {
+		t.Fatal("negative: a mongodb:// URI cannot carry a Windows socket path; use SetHosts")
 	}
 }
